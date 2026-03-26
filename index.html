@@ -758,7 +758,25 @@
       from { opacity: 0; transform: translateY(5px); }
       to { opacity: 1; transform: translateY(0); }
     }
+.warning-panel {
+  border: 1px solid #2A0000;
+  background: #120000;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+}
 
+.warning-title {
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  color: #FF4D4D;
+  margin-bottom: 6px;
+}
+
+.warning-item {
+  font-size: 11px;
+  color: #FF8080;
+  margin-bottom: 4px;
+}
     @media (max-width: 760px) {
       #header {
         padding: 14px 14px;
@@ -801,6 +819,64 @@
       #week-label {
         order: -1;
         width: 100%;
+        #backup-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+#backup-modal-box {
+  width: min(420px, calc(100vw - 32px));
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  padding: 18px 18px 16px;
+}
+
+#backup-modal-title {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 10px;
+}
+
+#backup-modal-text {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text);
+  margin-bottom: 14px;
+}
+
+#backup-modal-actions {
+  display: flex;
+  gap: 8px;
+}
+
+#backup-now-btn,
+#backup-later-btn {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+#backup-now-btn {
+  background: var(--accent);
+  color: #080808;
+  border: none;
+}
+
+#backup-later-btn {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border2);
+}
       }
     }
   </style>
@@ -835,6 +911,20 @@
 
   <div id="main">
     <div id="view-week" class="view active">
+      <div id="view-week" class="view active">
+
+  <div style="padding:10px 0; display:flex; gap:10px;">
+    <button onclick="exportData()">Export Data</button>
+    <input type="file" id="importFile" style="display:none" onchange="importData(event)">
+    <button onclick="document.getElementById('importFile').click()">Import Data</button>
+  </div>
+
+  <div class="warning-panel">
+    <div class="warning-title">Core warnings</div>
+    <div class="warning-list" id="warning-list"></div>
+  </div>
+
+  <div class="week-nav">
       <div class="top-actions">
         <button class="nav-btn" id="export-btn">Export Data</button>
         <button class="nav-btn" id="import-btn">Import Data</button>
@@ -909,7 +999,18 @@
       <div id="hist-list"></div>
     </div>
   </div>
-
+<div id="backup-modal" style="display:none;">
+  <div id="backup-modal-box">
+    <div id="backup-modal-title">WEEKLY BACKUP</div>
+    <div id="backup-modal-text">
+      Export your tracker data now. One backup protects the whole system.
+    </div>
+    <div id="backup-modal-actions">
+      <button id="backup-now-btn">Export Now</button>
+      <button id="backup-later-btn">Later</button>
+    </div>
+  </div>
+</div>
   <div id="toast"></div>
 
   <script>
@@ -1399,6 +1500,7 @@
 
       updateHeaderMeta(logs);
       updateScoreBar(weekScore(logs, weekOffset));
+      checkWarnings(logs);
       updateTopStats(logs);
       renderMissionPanels(logs);
 
@@ -1805,13 +1907,113 @@
       });
     }
 
-    function init() {
+    function init(bindBackupReminderEvents();
+maybeShowBackupReminder();) {
       $('score-max-txt').textContent = `/ ${TOTAL_MAX}`;
       $('target-lbl').textContent = TARGET;
       bindStaticEvents();
+      function checkWarnings(logs) {
+  const days = weekDays(0);
+  const today = todayStr();
+  const passedDays = days.filter(d => d <= today).length;
+
+  let warnings = [];
+
+  // NON-NEGOTIABLE 1: Study (min 5 days)
+  let studyCount = 0;
+  days.forEach(d => {
+    if (logs[d] && logs[d]['study']) studyCount++;
+  });
+
+  const remainingDays = 7 - passedDays;
+
+  if (studyCount < 5 && studyCount + remainingDays < 5) {
+    warnings.push('Study target failed (5 days not possible)');
+  } else if (studyCount < 5) {
+    warnings.push('Study behind pace (' + studyCount + '/5)');
+  }
+
+  // NON-NEGOTIABLE 2: Financial review (must be done)
+  const wk = weekKey(0);
+  if (!logs[wk] || !logs[wk]['finreview']) {
+    warnings.push('Financial review not completed');
+  }
+
+  // NON-NEGOTIABLE 3: Physio (min 5 days)
+  let physioCount = 0;
+  days.forEach(d => {
+    if (logs[d] && logs[d]['physio']) physioCount++;
+  });
+
+  if (physioCount < 5 && physioCount + remainingDays < 5) {
+    warnings.push('Physio target failed (5 days not possible)');
+  } else if (physioCount < 5) {
+    warnings.push('Physio behind pace (' + physioCount + '/5)');
+  }
+
+  renderWarnings(warnings);
+}
+
+function renderWarnings(warnings) {
+  const container = document.getElementById('warning-list');
+  if (!container) return;
+
+  if (warnings.length === 0) {
+    container.innerHTML = '<div style="color:#1C1C1C;font-size:11px;">No issues</div>';
+    return;
+  }
+
+  container.innerHTML = warnings
+    .map(w => `<div class="warning-item">${w}</div>`)
+    .join('');
+}
       renderWeek();
     }
+const BACKUP_REMINDER_KEY = 'acc_last_backup_reminder';
 
+function getCurrentWeekStamp() {
+  const d = new Date();
+  return `${d.getFullYear()}-W${pad(getISOWeek(d))}`;
+}
+
+function maybeShowBackupReminder() {
+  const lastShown = localStorage.getItem(BACKUP_REMINDER_KEY);
+  const thisWeek = getCurrentWeekStamp();
+
+  if (lastShown === thisWeek) return;
+
+  const modal = $('backup-modal');
+  if (!modal) return;
+
+  modal.style.display = 'flex';
+}
+
+function closeBackupReminder(markShown = true) {
+  const modal = $('backup-modal');
+  if (modal) modal.style.display = 'none';
+
+  if (markShown) {
+    localStorage.setItem(BACKUP_REMINDER_KEY, getCurrentWeekStamp());
+  }
+}
+
+function bindBackupReminderEvents() {
+  const nowBtn = $('backup-now-btn');
+  const laterBtn = $('backup-later-btn');
+
+  if (nowBtn) {
+    nowBtn.addEventListener('click', () => {
+      exportData();
+      closeBackupReminder(true);
+    });
+  }
+
+  if (laterBtn) {
+    laterBtn.addEventListener('click', () => {
+      closeBackupReminder(true);
+    });
+  }
+}
     init();
   </script>
 </body>
